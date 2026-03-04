@@ -8,7 +8,7 @@ import {
 } from "./account-store";
 import type { OAuthAuthDetails } from "./types";
 
-const DEFAULT_EXHAUSTED_DURATION_MS = 3600_000; // 1 hour
+const DEFAULT_EXHAUSTED_DURATION_MS = 86_400_000; // 24 hours (matches daily quota reset)
 
 /**
  * Manages multiple Google accounts for quota fallback.

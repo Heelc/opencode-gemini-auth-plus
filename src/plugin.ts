@@ -73,6 +73,7 @@ export const GeminiCLIOAuthPlugin = async (
         client,
         getAuthResolver: () => latestGeminiAuthResolver,
         getConfiguredProjectId: () => latestGeminiConfiguredProjectId,
+        accountManager,
       }),
       gemini_accounts: createGeminiAccountsTool({ accountManager }),
     },

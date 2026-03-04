@@ -127,7 +127,7 @@ describe("AccountManager.markExhausted / isExhausted", () => {
         expect(manager.isExhausted(account.id)).toBe(true);
     });
 
-    it("defaults exhaustedUntil to 1 hour when no resetTime is provided", () => {
+    it("defaults exhaustedUntil to 24 hours when no resetTime is provided", () => {
         const manager = new AccountManager(storePath);
         manager.addAccount({ email: "a@gmail.com", refresh: "token-a" });
 
@@ -135,8 +135,12 @@ describe("AccountManager.markExhausted / isExhausted", () => {
         manager.markExhausted(account.id);
         expect(manager.isExhausted(account.id)).toBe(true);
 
-        // After 1 hour it should recover
+        // Still exhausted after 1 hour
         Date.now = () => FIXED_NOW + 3600_001;
+        expect(manager.isExhausted(account.id)).toBe(true);
+
+        // Recovered after 24 hours
+        Date.now = () => FIXED_NOW + 86_400_001;
         expect(manager.isExhausted(account.id)).toBe(false);
     });
 });
