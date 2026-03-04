@@ -28,7 +28,7 @@ Add the plugin to your Opencode configuration file
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-gemini-auth@latest"]
+  "plugin": ["opencode-gemini-auth-plus@latest"]
 }
 ```
 
@@ -265,7 +265,7 @@ you must clear the cached plugin:
 
 ```bash
 # Clear the specific plugin cache
-rm -rf ~/.cache/opencode/node_modules/opencode-gemini-auth
+rm -rf ~/.cache/opencode/node_modules/opencode-gemini-auth-plus
 
 # Run Opencode to trigger a fresh install
 opencode

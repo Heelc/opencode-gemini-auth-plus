@@ -11,7 +11,25 @@ permissions:
   id-token: write
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Run tests
+        run: bun test
+
   publish:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -105,8 +123,8 @@ jobs:
             echo "To get the latest version:"
             echo ""
             printf '%s\n' '```bash'
-            printf '%s\n' '(cd ~ && sed -i.bak '\''/"opencode-gemini-auth"/d'\'' .cache/opencode/package.json && \'
-            printf '%s\n' 'rm -rf .cache/opencode/node_modules/opencode-gemini-auth && \'
+            printf '%s\n' '(cd ~ && sed -i.bak '\''/\"opencode-gemini-auth-plus\"/d'\'' .cache/opencode/package.json && \'
+            printf '%s\n' 'rm -rf .cache/opencode/node_modules/opencode-gemini-auth-plus && \'
             printf '%s\n' 'echo "Plugin update script finished successfully.")'
             printf '%s\n' '```'
 
