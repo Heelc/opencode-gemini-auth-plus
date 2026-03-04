@@ -30,6 +30,7 @@ const CLOUDCODE_DOMAINS = new Set([
   "cloudcode-pa.googleapis.com",
   "staging-cloudcode-pa.googleapis.com",
   "autopush-cloudcode-pa.googleapis.com",
+  "cloudaicompanion.googleapis.com",
 ]);
 
 /**

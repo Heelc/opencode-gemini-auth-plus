@@ -6,11 +6,12 @@ import { isGeminiDebugEnabled, logGeminiDebugMessage } from "./debug";
 import { resolveProjectContextFromAccessToken } from "./project";
 import { startOAuthListener, type OAuthListener } from "./server";
 import type { OAuthAuthDetails } from "./types";
+import type { AccountManager } from "./account-manager";
 
 /**
  * Builds the OAuth authorize callback used by plugin auth methods.
  */
-export function createOAuthAuthorizeMethod(): () => Promise<{
+export function createOAuthAuthorizeMethod(accountManager?: AccountManager): () => Promise<{
   url: string;
   instructions: string;
   method: string;
@@ -22,6 +23,16 @@ export function createOAuthAuthorizeMethod(): () => Promise<{
     ): Promise<GeminiTokenExchangeResult> => {
       if (result.type !== "success" || !result.access) {
         return result;
+      }
+
+      // Add account to the pool
+      if (accountManager) {
+        accountManager.addAccount({
+          email: result.email,
+          refresh: result.refresh,
+          access: result.access,
+          expires: result.expires,
+        });
       }
 
       const projectFromEnv = process.env.OPENCODE_GEMINI_PROJECT_ID?.trim() ?? "";
@@ -118,7 +129,7 @@ export function createOAuthAuthorizeMethod(): () => Promise<{
           } finally {
             try {
               await listener?.close();
-            } catch {}
+            } catch { }
           }
         },
       };
@@ -194,5 +205,5 @@ function openBrowserUrl(url: string): void {
       detached: true,
     });
     child.unref?.();
-  } catch {}
+  } catch { }
 }

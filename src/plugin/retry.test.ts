@@ -279,3 +279,51 @@ describe("retryInternals", () => {
     expect(retryInternals.parseRetryDelayFromMessage("Please retry in 2s")).toBe(2000);
   });
 });
+
+describe("classifyQuotaResponse (cloudaicompanion domain)", () => {
+  it("classifies QUOTA_EXHAUSTED from cloudaicompanion.googleapis.com as terminal", async () => {
+    const { classifyQuotaResponse } = await import("./retry/quota");
+    const response = new Response(
+      JSON.stringify({
+        error: {
+          message: "Quota exceeded for quota metric 'Chat API requests' and limit 'Chat API requests per day per user' of service 'cloudaicompanion.googleapis.com'",
+          details: [
+            {
+              "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+              reason: "QUOTA_EXHAUSTED",
+              domain: "cloudaicompanion.googleapis.com",
+            },
+          ],
+        },
+      }),
+      { status: 429, headers: { "content-type": "application/json" } },
+    );
+
+    const result = await classifyQuotaResponse(response);
+    expect(result).not.toBeNull();
+    expect(result!.terminal).toBe(true);
+    expect(result!.reason).toBe("QUOTA_EXHAUSTED");
+  });
+
+  it("returns null for unknown domains not in whitelist", async () => {
+    const { classifyQuotaResponse } = await import("./retry/quota");
+    const response = new Response(
+      JSON.stringify({
+        error: {
+          message: "quota exhausted",
+          details: [
+            {
+              "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+              reason: "QUOTA_EXHAUSTED",
+              domain: "unknown-service.googleapis.com",
+            },
+          ],
+        },
+      }),
+      { status: 429, headers: { "content-type": "application/json" } },
+    );
+
+    const result = await classifyQuotaResponse(response);
+    expect(result).toBeNull();
+  });
+});

@@ -36,11 +36,29 @@ export interface LoaderResult {
   fetch(input: RequestInfo, init?: RequestInit): Promise<Response>;
 }
 
+export type AuthPrompt =
+  | {
+    type: "text";
+    key: string;
+    message: string;
+    placeholder?: string;
+    validate?: (value: string) => string | undefined;
+    condition?: (inputs: Record<string, string>) => boolean;
+  }
+  | {
+    type: "select";
+    key: string;
+    message: string;
+    options: Array<{ label: string; value: string; hint?: string }>;
+    condition?: (inputs: Record<string, string>) => boolean;
+  };
+
 export interface AuthMethod {
   provider?: string;
   label: string;
   type: "oauth" | "api";
-  authorize?: () => Promise<{
+  prompts?: AuthPrompt[];
+  authorize?: (inputs?: Record<string, string>) => Promise<{
     url: string;
     instructions: string;
     method: string;
