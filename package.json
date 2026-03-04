@@ -1,7 +1,7 @@
 {
   "name": "opencode-gemini-auth-plus",
   "module": "index.ts",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "author": "Heelc",
   "repository": "https://github.com/Heelc/opencode-gemini-auth-plus",
   "files": [
