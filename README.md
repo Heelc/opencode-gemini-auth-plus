@@ -7,6 +7,14 @@
 you to use your existing Gemini plan and quotas (including the free tier)
 directly within Opencode, bypassing separate API billing.
 
+## Features
+
+- 🔑 **OAuth Authentication** — browser-based Google account login
+- 👥 **Multi-Account Pool** — register multiple accounts with priority-based fallback
+- 🔄 **Auto Account Switching** — automatically switches to the next account on `QUOTA_EXHAUSTED`
+- 📊 **All-Account Quota View** — `/gquota` shows quota for every account in your pool
+- ⚙️ **Account Management** — list, remove, disable, enable accounts via `opencode auth login`
+
 ## Prerequisites
 
 - [Opencode CLI](https://opencode.ai) installed.
@@ -32,26 +40,38 @@ Add the plugin to your Opencode configuration file
 
 ## Usage
 
-1. **Login**: Run the authentication command in your terminal:
+### Authentication
 
-   ```bash
-   opencode auth login
-   ```
+1. Run `opencode auth login`
+2. Select **Google** → **OAuth with Google (Gemini CLI)**
+3. Approve access in the browser
 
-2. **Select Provider**: Choose **Google** from the list.
-3. **Authenticate**: Select **OAuth with Google (Gemini CLI)**.
-   - A browser window will open for you to approve the access.
-   - The plugin spins up a temporary local server to capture the callback.
-   - If the local server fails (e.g., port in use or headless environment),
-     you can manually paste the callback URL or just the authorization code.
+### Multi-Account Management
 
-Once authenticated, Opencode will use your Google account for Gemini requests.
+Add multiple accounts for quota fallback:
 
-To check your current Gemini Code Assist quota buckets at any time, run:
+1. Run `opencode auth login`
+2. Select **Google** → **📋 Manage Gemini accounts**
+3. Available actions:
+   - **📋 List all accounts** — view status (ACTIVE / EXHAUSTED / DISABLED), priority, email
+   - **🗑️ Remove an account** — remove from the managed pool
+   - **🚫 Disable an account** — temporarily skip without removing
+   - **✅ Enable an account** — re-enable a disabled account
 
-```bash
+Accounts are tried in priority order (lowest number = highest priority).
+When an account's daily quota is exhausted, the plugin automatically switches
+to the next available account.
+
+### Quota Monitoring
+
+Check quota for **all accounts** in your pool:
+
+```
 /gquota
 ```
+
+Each account's quota is queried independently, showing per-model usage,
+remaining requests, and reset times.
 
 ## Configuration
 
@@ -113,7 +133,7 @@ enable "thinking" features.
             }
           }
         },
-        "gemini-3-pro-preview": {
+        "gemini-3.1-pro-preview": {
           "options": {
             "thinkingConfig": {
               "thinkingLevel": "high",
@@ -135,7 +155,7 @@ the Gemini product page for the current model identifiers.
 The plugin supports configuring Gemini "thinking" features per-model via
 `thinkingConfig`. The available fields depend on the model family:
 
-- For Gemini 3 models: use `thinkingLevel` with values `"low"` or `"high"`.
+- For Gemini 3.x models: use `thinkingLevel` with values `"low"` or `"high"`.
 - For Gemini 2.5 models: use `thinkingBudget` (token count).
 - `includeThoughts` (boolean) controls whether the model emits internal thoughts.
 
@@ -146,7 +166,7 @@ A combined example showing both model types:
   "provider": {
     "google": {
       "models": {
-        "gemini-3-pro-preview": {
+        "gemini-3.1-pro-preview": {
           "options": {
             "thinkingConfig": {
               "thinkingLevel": "high",
@@ -188,13 +208,13 @@ If automatic provisioning fails, you may need to set up the project manually:
 Common causes of `429 RESOURCE_EXHAUSTED` or `QUOTA_EXHAUSTED`:
 
 - **No project ID configured**: the plugin uses a managed free-tier project, which has lower quotas.
-- **Model-specific limits**: quotas are tracked per model (e.g., `gemini-3-pro-preview` vs `gemini-3-flash-preview`).
+- **Model-specific limits**: quotas are tracked per model (e.g., `gemini-3.1-pro-preview` vs `gemini-3-flash-preview`).
 - **Large prompts**: OAuth/Code Assist does not support cached content, so long system prompts and history can burn quota quickly.
 - **Parallel sessions**: multiple Opencode windows can drain the same bucket.
 
 Notes:
 
-- **Gemini CLI auto-fallbacks**: the official CLI may fall back to Flash when Pro quotas are exhausted, so it can appear to “work” even if the Pro bucket is depleted.
+- **Multi-account fallback**: when the current account's daily quota is exhausted, the plugin automatically switches to the next available account in your pool. Use `opencode auth login` → **Manage Gemini accounts** to add more accounts.
 - **Paid plans still require a project**: to use paid quotas in Opencode, set `provider.google.options.projectId` (or `OPENCODE_GEMINI_PROJECT_ID`) and re-authenticate.
 
 ### Debugging
@@ -258,19 +278,24 @@ To develop on this plugin locally:
 1. **Clone**:
 
    ```bash
-   git clone https://github.com/jenslys/opencode-gemini-auth.git
-   cd opencode-gemini-auth
+   git clone https://github.com/Heelc/opencode-gemini-auth-plus.git
+   cd opencode-gemini-auth-plus
    bun install
    ```
 
 2. **Link**:
-   Update your Opencode config to point to your local directory using a
-   `file://` URL:
+   Update your Opencode config to point to your local directory:
 
    ```json
    {
-     "plugin": ["file:///absolute/path/to/opencode-gemini-auth"]
+     "plugin": ["/absolute/path/to/opencode-gemini-auth-plus"]
    }
+   ```
+
+3. **Test**:
+
+   ```bash
+   bun test
    ```
 
 ## License
