@@ -18,6 +18,8 @@ const DEFAULT_EXHAUSTED_DURATION_MS = 86_400_000; // 24 hours (matches daily quo
  */
 export class AccountManager {
     private readonly storePath: string;
+    /** Round-robin pointer for distributing requests across accounts. */
+    private roundRobinIndex = 0;
 
     constructor(storePath?: string) {
         this.storePath = storePath ?? getDefaultStorePath();
@@ -29,6 +31,25 @@ export class AccountManager {
     getActiveAccount(): StoredAccount | undefined {
         const accounts = this.getAllAccounts();
         return accounts.find((a) => !a.disabled && !this.isExhausted(a.id));
+    }
+
+    /**
+     * Returns the next available account via round-robin rotation.
+     *
+     * Each call advances the pointer so consecutive requests are distributed
+     * evenly across all non-exhausted, non-disabled accounts.
+     */
+    getNextAccount(): StoredAccount | undefined {
+        const available = this.getAllAccounts().filter(
+            (a) => !a.disabled && !this.isExhausted(a.id),
+        );
+        if (available.length === 0) {
+            return undefined;
+        }
+
+        const account = available[this.roundRobinIndex % available.length]!;
+        this.roundRobinIndex = (this.roundRobinIndex + 1) % Number.MAX_SAFE_INTEGER;
+        return account;
     }
 
     /**

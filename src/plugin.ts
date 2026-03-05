@@ -104,12 +104,12 @@ export const GeminiCLIOAuthPlugin = async (
             // Check if we have multiple accounts in the pool
             const poolAccounts = accountManager.getAllAccounts();
             if (poolAccounts.length >= 1) {
-              // Multi-account mode: full pipeline with account fallback on QUOTA_EXHAUSTED
+              // Multi-account mode: full pipeline with per-request round-robin load balancing
               const triedAccountIds = new Set<string>();
               let lastExhaustedResponse: Response | undefined;
 
               while (true) {
-                const account = accountManager.getActiveAccount();
+                const account = accountManager.getNextAccount();
                 if (!account || triedAccountIds.has(account.id)) {
                   if (lastExhaustedResponse) {
                     return lastExhaustedResponse;
