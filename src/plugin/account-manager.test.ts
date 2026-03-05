@@ -329,3 +329,71 @@ describe("AccountManager.getActiveAccount (disabled + exhausted overlap)", () =>
         expect(manager.getActiveAccount()).toBeUndefined();
     });
 });
+
+describe("AccountManager.getNextAccount", () => {
+    it("returns undefined when no accounts exist", () => {
+        const manager = new AccountManager(storePath);
+        expect(manager.getNextAccount()).toBeUndefined();
+    });
+
+    it("returns the only account when one exists", () => {
+        const manager = new AccountManager(storePath);
+        manager.addAccount({ email: "a@gmail.com", refresh: "token-a" });
+
+        expect(manager.getNextAccount()!.email).toBe("a@gmail.com");
+        expect(manager.getNextAccount()!.email).toBe("a@gmail.com");
+    });
+
+    it("alternates between accounts on successive calls", () => {
+        const manager = new AccountManager(storePath);
+        manager.addAccount({ email: "a@gmail.com", refresh: "token-a" });
+        manager.addAccount({ email: "b@gmail.com", refresh: "token-b" });
+
+        const first = manager.getNextAccount()!;
+        const second = manager.getNextAccount()!;
+        const third = manager.getNextAccount()!;
+
+        expect(first.id).not.toBe(second.id);
+        expect(first.id).toBe(third.id); // wraps around
+    });
+
+    it("skips exhausted accounts", () => {
+        const manager = new AccountManager(storePath);
+        manager.addAccount({ email: "a@gmail.com", refresh: "token-a" });
+        manager.addAccount({ email: "b@gmail.com", refresh: "token-b" });
+
+        const accountA = manager.getAllAccounts().find((a) => a.email === "a@gmail.com")!;
+        manager.markExhausted(accountA.id, FIXED_NOW + 3600_000);
+
+        // All calls should return B since A is exhausted
+        expect(manager.getNextAccount()!.email).toBe("b@gmail.com");
+        expect(manager.getNextAccount()!.email).toBe("b@gmail.com");
+    });
+
+    it("returns undefined when all accounts are exhausted or disabled", () => {
+        const manager = new AccountManager(storePath);
+        manager.addAccount({ email: "a@gmail.com", refresh: "token-a" });
+        manager.addAccount({ email: "b@gmail.com", refresh: "token-b" });
+
+        const accounts = manager.getAllAccounts();
+        manager.markExhausted(accounts[0]!.id, FIXED_NOW + 3600_000);
+        manager.disableAccount(accounts[1]!.id);
+
+        expect(manager.getNextAccount()).toBeUndefined();
+    });
+
+    it("distributes evenly across many calls", () => {
+        const manager = new AccountManager(storePath);
+        manager.addAccount({ email: "a@gmail.com", refresh: "token-a" });
+        manager.addAccount({ email: "b@gmail.com", refresh: "token-b" });
+
+        const counts = new Map<string, number>();
+        for (let i = 0; i < 10; i++) {
+            const email = manager.getNextAccount()!.email!;
+            counts.set(email, (counts.get(email) ?? 0) + 1);
+        }
+
+        expect(counts.get("a@gmail.com")).toBe(5);
+        expect(counts.get("b@gmail.com")).toBe(5);
+    });
+});
