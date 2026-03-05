@@ -184,6 +184,25 @@ async function queryMultiAccountQuota(
         continue;
       }
 
+      // Auto-clear exhausted state if all buckets show remaining quota
+      if (isExhausted) {
+        const allRecovered = quota.buckets.every(
+          (b) => b.remainingFraction === undefined || b.remainingFraction > 0,
+        );
+        if (allRecovered) {
+          accountManager.clearExhausted(account.id);
+          // Update the status icon in-place for this output
+          const lastHeaderIndex = sections.length - 1;
+          for (let i = lastHeaderIndex; i >= 0; i--) {
+            const line = sections[i];
+            if (line && line.includes("⚠️") && line.includes(label)) {
+              sections[i] = line.replace("⚠️", "✅");
+              break;
+            }
+          }
+        }
+      }
+
       // Indent the quota output under this account
       const quotaOutput = formatGeminiQuotaOutput(
         projectContext.effectiveProjectId,

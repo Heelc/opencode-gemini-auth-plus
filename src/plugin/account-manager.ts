@@ -66,6 +66,20 @@ export class AccountManager {
     }
 
     /**
+     * Clears the exhausted state for an account.
+     * Called when the actual quota (from API) shows the account has recovered.
+     */
+    clearExhausted(accountId: string): void {
+        const data = loadAccounts(this.storePath);
+        const account = data.accounts.find((a) => a.id === accountId);
+        if (!account?.exhaustedUntil) {
+            return;
+        }
+        delete account.exhaustedUntil;
+        saveAccounts(data, this.storePath);
+    }
+
+    /**
      * Adds or updates a Google account in the pool.
      * Returns the stored account (with assigned id and priority).
      */
