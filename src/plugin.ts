@@ -135,6 +135,7 @@ export const GeminiCLIOAuthPlugin = async (
                 if (accessTokenExpired(authDetails)) {
                   const refreshed = await refreshAccessToken(authDetails, client);
                   if (!refreshed) {
+                    hadAuthFailure = true;
                     continue; // skip this account
                   }
                   accountManager.updateTokens(
