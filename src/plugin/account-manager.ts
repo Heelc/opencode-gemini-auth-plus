@@ -19,7 +19,7 @@ const DEFAULT_EXHAUSTED_DURATION_MS = 86_400_000; // 24 hours (matches daily quo
 export class AccountManager {
     private readonly storePath: string;
     /** Round-robin pointer for distributing requests across accounts. */
-    private roundRobinIndex = 0;
+    private roundRobinIndex = Math.floor(Math.random() * 1000);
 
     constructor(storePath?: string) {
         this.storePath = storePath ?? getDefaultStorePath();
