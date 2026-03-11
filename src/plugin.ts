@@ -174,7 +174,9 @@ export const GeminiCLIOAuthPlugin = async (
                   projectId: projectContext.effectiveProjectId,
                 });
 
-                const response = await fetchWithRetry(transformed.request, transformed.init);
+                const response = await fetchWithRetry(transformed.request, transformed.init, {
+                    terminalOnRateLimit: true,
+                });
 
                 // Handle 401: refresh access token and retry once, then try next account
                 if (response.status === 401) {
@@ -198,7 +200,9 @@ export const GeminiCLIOAuthPlugin = async (
                       projectContext.effectiveProjectId,
                       thinkingConfigDefaults,
                     );
-                    const retryResponse = await fetchWithRetry(retryTransformed.request, retryTransformed.init);
+                    const retryResponse = await fetchWithRetry(retryTransformed.request, retryTransformed.init, {
+                        terminalOnRateLimit: true,
+                    });
                     if (retryResponse.status !== 401) {
                       // Sync refreshed auth to framework (ensures auth.json is not stale/empty)
                       try {
@@ -252,6 +256,17 @@ export const GeminiCLIOAuthPlugin = async (
                     accountManager.markExhausted(account.id, resetTime);
                     lastExhaustedResponse = response;
                     continue; // try next account
+                  }
+
+                  // RATE_LIMIT: switch accounts immediately (short-lived, no need to mark exhausted)
+                  if (quotaContext?.reason === "RATE_LIMIT_EXCEEDED") {
+                    if (isGeminiDebugEnabled()) {
+                      logGeminiDebugMessage(
+                        `Account ${account.email ?? account.id} rate-limited, switching to next account`,
+                      );
+                    }
+                    lastExhaustedResponse = response;
+                    continue;
                   }
                 }
 

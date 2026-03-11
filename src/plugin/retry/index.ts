@@ -14,6 +14,11 @@ const retryCooldownByKey = new Map<string, number>();
 const RETRY_IN_FLIGHT_LOG_INTERVAL_MS = 5000;
 const MODEL_CAPACITY_COOLDOWN_MS = 8000;
 
+export interface FetchWithRetryOptions {
+  /** Treat RATE_LIMIT_EXCEEDED as terminal (no retries). Used in multi-account mode. */
+  terminalOnRateLimit?: boolean;
+}
+
 /**
  * Sends requests with retry/backoff semantics aligned to Gemini CLI:
  * - Retries on 429/5xx and transient network failures
@@ -23,6 +28,7 @@ const MODEL_CAPACITY_COOLDOWN_MS = 8000;
 export async function fetchWithRetry(
   input: RequestInfo,
   init: RequestInit | undefined,
+  options?: FetchWithRetryOptions,
 ): Promise<Response> {
   if (!canRetryRequest(init)) {
     return fetch(input, init);
@@ -71,6 +77,17 @@ export async function fetchWithRetry(
     }
 
     const quotaContext = response.status === 429 ? await classifyQuotaResponse(response) : null;
+
+    // In multi-account mode, treat RATE_LIMIT as terminal → let caller switch accounts
+    if (response.status === 429
+        && options?.terminalOnRateLimit
+        && quotaContext?.reason === "RATE_LIMIT_EXCEEDED") {
+      debugRetry(
+        `attempt ${attempt} rate-limited (multi-account terminal), returning for account switch`,
+      );
+      return response;
+    }
+
     if (response.status === 429 && quotaContext?.terminal) {
       if (quotaContext.reason === "MODEL_CAPACITY_EXHAUSTED") {
         const cooldownMs = quotaContext.retryDelayMs ?? MODEL_CAPACITY_COOLDOWN_MS;

@@ -270,6 +270,69 @@ describe("fetchWithRetry", () => {
     expect(scheduledDelays[0]).toBe(1500);
     expect(scheduledDelays[1]).toBe(1500);
   });
+
+  it("returns immediately on RATE_LIMIT when terminalOnRateLimit is set", async () => {
+    const fetchMock = mock(async () =>
+      makeQuota429("RATE_LIMIT_EXCEEDED", "1.5s"),
+    );
+    (globalThis as any).fetch = fetchMock;
+
+    const result = await fetchWithRetry(
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini:streamGenerateContent",
+      { method: "POST", body: "{}" },
+      { terminalOnRateLimit: true },
+    );
+    expect(result.status).toBe(429);
+    // Should NOT retry — only 1 fetch call
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries RATE_LIMIT normally when terminalOnRateLimit is not set", async () => {
+    const fetchMock = mock(async () => {
+      if (fetchMock.mock.calls.length < 3) {
+        return makeQuota429("RATE_LIMIT_EXCEEDED", "0.1s");
+      }
+      return new Response("ok", { status: 200 });
+    });
+    (globalThis as any).fetch = fetchMock;
+
+    const result = await fetchWithRetry(
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini:streamGenerateContent",
+      { method: "POST", body: "{}" },
+    );
+    expect(result.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not affect QUOTA_EXHAUSTED when terminalOnRateLimit is set", async () => {
+    const fetchMock = mock(async () =>
+      makeQuota429("QUOTA_EXHAUSTED"),
+    );
+    (globalThis as any).fetch = fetchMock;
+
+    const result = await fetchWithRetry(
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini:streamGenerateContent",
+      { method: "POST", body: "{}" },
+      { terminalOnRateLimit: true },
+    );
+    expect(result.status).toBe(429);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not affect MODEL_CAPACITY_EXHAUSTED when terminalOnRateLimit is set", async () => {
+    const fetchMock = mock(async () =>
+      makeQuota429("MODEL_CAPACITY_EXHAUSTED"),
+    );
+    (globalThis as any).fetch = fetchMock;
+
+    const result = await fetchWithRetry(
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini:streamGenerateContent",
+      { method: "POST", body: "{}" },
+      { terminalOnRateLimit: true },
+    );
+    expect(result.status).toBe(429);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("retryInternals", () => {
