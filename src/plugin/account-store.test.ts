@@ -174,3 +174,32 @@ describe("removeAccount", () => {
         expect(removed).toBe(false);
     });
 });
+
+describe("getDefaultStorePath", () => {
+    const originalEnv = process.env.OPENCODE_GEMINI_ACCOUNTS_PATH;
+
+    afterEach(() => {
+        if (originalEnv !== undefined) {
+            process.env.OPENCODE_GEMINI_ACCOUNTS_PATH = originalEnv;
+        } else {
+            delete process.env.OPENCODE_GEMINI_ACCOUNTS_PATH;
+        }
+    });
+
+    it("respects OPENCODE_GEMINI_ACCOUNTS_PATH env var", () => {
+        const customPath = "/custom/path/to/gemini-accounts.json";
+        process.env.OPENCODE_GEMINI_ACCOUNTS_PATH = customPath;
+
+        const { getDefaultStorePath } = require("./account-store");
+        expect(getDefaultStorePath()).toBe(customPath);
+    });
+
+    it("ignores blank OPENCODE_GEMINI_ACCOUNTS_PATH", () => {
+        process.env.OPENCODE_GEMINI_ACCOUNTS_PATH = "   ";
+
+        const { getDefaultStorePath } = require("./account-store");
+        // Should fall back to default path containing "gemini-accounts.json"
+        expect(getDefaultStorePath()).toContain("gemini-accounts.json");
+        expect(getDefaultStorePath()).not.toBe("   ");
+    });
+});

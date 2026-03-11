@@ -31,6 +31,10 @@ const EMPTY_STORE: AccountStoreData = { version: 1, accounts: [] };
  * Returns the default file path for the account store.
  */
 export function getDefaultStorePath(): string {
+    const envPath = process.env.OPENCODE_GEMINI_ACCOUNTS_PATH?.trim();
+    if (envPath) {
+        return envPath;
+    }
     return join(homedir(), ".config", "opencode", "gemini-accounts.json");
 }
 

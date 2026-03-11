@@ -107,6 +107,7 @@ export const GeminiCLIOAuthPlugin = async (
               // Multi-account mode: full pipeline with per-request round-robin load balancing
               const triedAccountIds = new Set<string>();
               let lastExhaustedResponse: Response | undefined;
+              let hadAuthFailure = false;
 
               while (true) {
                 const account = accountManager.getNextAccount();
@@ -174,6 +175,53 @@ export const GeminiCLIOAuthPlugin = async (
 
                 const response = await fetchWithRetry(transformed.request, transformed.init);
 
+                // Handle 401: refresh access token and retry once, then try next account
+                if (response.status === 401) {
+                  if (isGeminiDebugEnabled()) {
+                    logGeminiDebugMessage(
+                      `Account ${account.email ?? account.id} got 401, attempting token refresh`,
+                    );
+                  }
+                  const refreshed = await refreshAccessToken(authDetails, client);
+                  if (refreshed?.access) {
+                    accountManager.updateTokens(
+                      account.id,
+                      refreshed.access,
+                      refreshed.expires ?? Date.now() + 3600_000,
+                      refreshed.refresh !== authDetails.refresh ? refreshed.refresh : undefined,
+                    );
+                    const retryTransformed = prepareGeminiRequest(
+                      input,
+                      init,
+                      refreshed.access,
+                      projectContext.effectiveProjectId,
+                      thinkingConfigDefaults,
+                    );
+                    const retryResponse = await fetchWithRetry(retryTransformed.request, retryTransformed.init);
+                    if (retryResponse.status !== 401) {
+                      // Sync refreshed auth to framework (ensures auth.json is not stale/empty)
+                      try {
+                        await client.auth.set({ path: { id: GEMINI_PROVIDER_ID }, body: refreshed });
+                      } catch { }
+                      await maybeShowGeminiCapacityToast(
+                        client,
+                        retryResponse,
+                        projectContext.effectiveProjectId,
+                        retryTransformed.requestedModel,
+                      );
+                      return transformGeminiResponse(
+                        retryResponse,
+                        retryTransformed.streaming,
+                        debugContext,
+                        retryTransformed.requestedModel,
+                      );
+                    }
+                  }
+                  // Refresh failed or retry still 401 → try next account
+                  hadAuthFailure = true;
+                  continue;
+                }
+
                 // Check for terminal quota exhaustion → switch accounts
                 if (response.status === 429) {
                   const { classifyQuotaResponse } = await import("./plugin/retry/quota");
@@ -204,6 +252,14 @@ export const GeminiCLIOAuthPlugin = async (
                     lastExhaustedResponse = response;
                     continue; // try next account
                   }
+                }
+
+                // Sync working auth to framework if a previous account had auth failure
+                // (prevents invalid_grant from leaving auth.json empty after restart)
+                if (hadAuthFailure) {
+                  try {
+                    await client.auth.set({ path: { id: GEMINI_PROVIDER_ID }, body: authDetails });
+                  } catch { }
                 }
 
                 await maybeShowGeminiCapacityToast(
@@ -268,6 +324,44 @@ export const GeminiCLIOAuthPlugin = async (
             });
 
             const response = await fetchWithRetry(transformed.request, transformed.init);
+
+            // Handle 401: refresh access token and retry once
+            if (response.status === 401) {
+              const refreshed = await refreshAccessToken(authRecord, client);
+              if (refreshed?.access) {
+                authRecord = refreshed;
+                const retryTransformed = prepareGeminiRequest(
+                  input,
+                  init,
+                  refreshed.access,
+                  projectContext.effectiveProjectId,
+                  thinkingConfigDefaults,
+                );
+                const retryDebugContext = startGeminiDebugRequest({
+                  originalUrl: toUrlString(input),
+                  resolvedUrl: toUrlString(retryTransformed.request),
+                  method: retryTransformed.init.method,
+                  headers: retryTransformed.init.headers,
+                  body: retryTransformed.init.body,
+                  streaming: retryTransformed.streaming,
+                  projectId: projectContext.effectiveProjectId,
+                });
+                const retryResponse = await fetchWithRetry(retryTransformed.request, retryTransformed.init);
+                await maybeShowGeminiCapacityToast(
+                  client,
+                  retryResponse,
+                  projectContext.effectiveProjectId,
+                  retryTransformed.requestedModel,
+                );
+                return transformGeminiResponse(
+                  retryResponse,
+                  retryTransformed.streaming,
+                  retryDebugContext,
+                  retryTransformed.requestedModel,
+                );
+              }
+            }
+
             await maybeShowGeminiCapacityToast(
               client,
               response,

@@ -263,9 +263,47 @@ describe("AccountManager.syncFromFramework", () => {
         expect(accounts[0]!.refresh).toBe("refresh-token-1");
     });
 
-    it("skips sync when store file already exists", () => {
+    it("skips sync when same refresh token already exists in pool", () => {
         const manager = new AccountManager(storePath);
         // First add creates the store file
+        manager.addAccount({ email: "existing@gmail.com", refresh: "same-refresh-token" });
+
+        const auth: OAuthAuthDetails = {
+            type: "oauth",
+            refresh: "same-refresh-token",
+            access: "new-access-token",
+            expires: FIXED_NOW + 3600_000,
+        };
+
+        manager.syncFromFramework(auth, "new@gmail.com");
+
+        // Should NOT have added a second account
+        const accounts = manager.getAllAccounts();
+        expect(accounts).toHaveLength(1);
+        expect(accounts[0]!.email).toBe("existing@gmail.com");
+    });
+
+    it("skips sync when same email already exists in pool", () => {
+        const manager = new AccountManager(storePath);
+        manager.addAccount({ email: "same@gmail.com", refresh: "old-token" });
+
+        const auth: OAuthAuthDetails = {
+            type: "oauth",
+            refresh: "different-token",
+            access: "access-token",
+            expires: FIXED_NOW + 3600_000,
+        };
+
+        manager.syncFromFramework(auth, "same@gmail.com");
+
+        const accounts = manager.getAllAccounts();
+        expect(accounts).toHaveLength(1);
+        expect(accounts[0]!.refresh).toBe("old-token");
+    });
+
+    it("syncs when store file exists but account is different", () => {
+        const manager = new AccountManager(storePath);
+        // First add creates the store file with an existing account
         manager.addAccount({ email: "existing@gmail.com", refresh: "existing-token" });
 
         const auth: OAuthAuthDetails = {
@@ -277,10 +315,11 @@ describe("AccountManager.syncFromFramework", () => {
 
         manager.syncFromFramework(auth, "new@gmail.com");
 
-        // Should NOT have added the new account
+        // Should have added the new account alongside the existing one
         const accounts = manager.getAllAccounts();
-        expect(accounts).toHaveLength(1);
-        expect(accounts[0]!.email).toBe("existing@gmail.com");
+        expect(accounts).toHaveLength(2);
+        expect(accounts.some((a) => a.email === "existing@gmail.com")).toBe(true);
+        expect(accounts.some((a) => a.email === "new@gmail.com")).toBe(true);
     });
 
     it("skips sync when auth has no refresh token", () => {

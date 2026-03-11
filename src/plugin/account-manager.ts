@@ -183,10 +183,13 @@ export class AccountManager {
         if (!auth.refresh) {
             return;
         }
-        // Only sync on first use — once the store file exists, the user
-        // manages the pool explicitly via auth flow / account-manage.
-        const { existsSync } = require("node:fs") as typeof import("node:fs");
-        if (existsSync(this.storePath)) {
+        // Deduplicate by refresh token or email rather than file existence,
+        // so new accounts are synced even when the store file already exists.
+        const existing = this.getAllAccounts();
+        const alreadySynced = existing.some(
+            (a) => a.refresh === auth.refresh || (email && a.email === email),
+        );
+        if (alreadySynced) {
             return;
         }
         this.addAccount({
