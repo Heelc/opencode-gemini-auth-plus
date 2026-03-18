@@ -3,7 +3,7 @@ import type { StoredAccount } from "./account-store";
 import { accessTokenExpired } from "./auth";
 import { refreshAccessToken } from "./token";
 import { classifyQuotaResponse } from "./retry/quota";
-import { fetchWithRetry } from "./retry";
+import { fetchWithRetry, quotaContextCache } from "./retry";
 import { isGeminiDebugEnabled, logGeminiDebugMessage } from "./debug";
 import type { PluginClient, OAuthAuthDetails } from "./types";
 
@@ -17,17 +17,15 @@ export interface AccountFetchDeps {
 }
 
 /**
- * Wraps fetchWithRetry with multi-account fallback on QUOTA_EXHAUSTED.
+ * Wraps fetchWithRetry with multi-account fallback on quota/capacity errors.
  *
  * Flow:
  * 1. Pick the active account from the pool
  * 2. Ensure its access token is fresh
- * 3. Execute fetch via fetchWithRetry
+ * 3. Execute fetch via fetchWithRetry (with terminalOnRateLimit so 429s return here)
  * 4. If 429 + QUOTA_EXHAUSTED → mark account exhausted, pick next account, retry
- * 5. If no more accounts → return the 429 response
- *
- * Non-quota errors (5xx, RATE_LIMIT_EXCEEDED, etc.) are handled by fetchWithRetry
- * and do NOT trigger account switching.
+ * 5. If 429 + RATE_LIMIT_EXCEEDED or MODEL_CAPACITY_EXHAUSTED → pick next account (no mark)
+ * 6. If no more accounts → return the 429 response
  */
 export async function fetchWithAccountFallback(
     deps: AccountFetchDeps,
@@ -41,7 +39,7 @@ export async function fetchWithAccountFallback(
     let lastExhaustedResponse: Response | undefined;
 
     while (true) {
-        const account = accountManager.getActiveAccount();
+        const account = accountManager.getNextAccount();
         if (!account) {
             if (lastExhaustedResponse) {
                 // All accounts exhausted — return the last 429 response
@@ -74,28 +72,37 @@ export async function fetchWithAccountFallback(
 
         // Inject the account's auth into the request headers
         const requestInit = injectAuth(init, authDetails.access);
-        const response = await fetchWithRetry(input, requestInit);
+        const response = await fetchWithRetry(input, requestInit, {
+            terminalOnRateLimit: true,
+        });
 
-        // Check if this is a terminal quota exhaustion
+        // With terminalOnRateLimit: true, fetchWithRetry returns all 429s that it
+        // considers terminal (QUOTA_EXHAUSTED, RATE_LIMIT_EXCEEDED, MODEL_CAPACITY_EXHAUSTED).
+        // We switch accounts for all of them; only QUOTA_EXHAUSTED marks the account as exhausted.
         if (response.status === 429) {
-            const quotaContext = await classifyQuotaResponse(response);
+            // Use cached quota context from fetchWithRetry (avoids re-reading response body)
+            const cachedContext = quotaContextCache.get(response);
+            const quotaContext = cachedContext ?? await classifyQuotaResponse(response.clone());
+
             if (quotaContext?.terminal && quotaContext.reason === "QUOTA_EXHAUSTED") {
-                // Mark this account as exhausted
                 const resetTime = quotaContext.retryDelayMs
                     ? Date.now() + quotaContext.retryDelayMs
                     : undefined;
-
                 if (isGeminiDebugEnabled()) {
                     logGeminiDebugMessage(
                         `Account ${account.email ?? account.id} quota exhausted, switching to next account`,
                     );
                 }
                 accountManager.markExhausted(account.id, resetTime);
-                lastExhaustedResponse = response;
-
-                // Try next account
-                continue;
+            } else if (isGeminiDebugEnabled()) {
+                const reason = quotaContext?.reason ?? "unknown";
+                logGeminiDebugMessage(
+                    `Account ${account.email ?? account.id} 429 (${reason}), switching to next account`,
+                );
             }
+
+            lastExhaustedResponse = response;
+            continue;
         }
 
         return response;

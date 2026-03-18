@@ -319,7 +319,7 @@ describe("fetchWithRetry", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("does not affect MODEL_CAPACITY_EXHAUSTED when terminalOnRateLimit is set", async () => {
+  it("returns immediately on MODEL_CAPACITY_EXHAUSTED when terminalOnRateLimit is set", async () => {
     const fetchMock = mock(async () =>
       makeQuota429("MODEL_CAPACITY_EXHAUSTED"),
     );

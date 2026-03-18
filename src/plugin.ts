@@ -204,6 +204,22 @@ export const GeminiCLIOAuthPlugin = async (
                         terminalOnRateLimit: true,
                     });
                     if (retryResponse.status !== 401) {
+                      // Check if the post-refresh response is a switchable 429
+                      const retrySwitchResult = await classifyAccountSwitch(retryResponse);
+                      if (retrySwitchResult) {
+                        if (retrySwitchResult.reason === "switch-quota") {
+                          const resetTime = retrySwitchResult.retryDelayMs
+                            ? Date.now() + retrySwitchResult.retryDelayMs : undefined;
+                          accountManager.markExhausted(account.id, resetTime);
+                        }
+                        if (isGeminiDebugEnabled()) {
+                          logGeminiDebugMessage(
+                            `Account ${account.email ?? account.id} post-refresh ${retrySwitchResult.reason}, switching to next account`,
+                          );
+                        }
+                        lastExhaustedResponse = retryResponse;
+                        continue;
+                      }
                       // Sync refreshed auth to framework (ensures auth.json is not stale/empty)
                       try {
                         await client.auth.set({ path: { id: GEMINI_PROVIDER_ID }, body: refreshed });
@@ -227,47 +243,25 @@ export const GeminiCLIOAuthPlugin = async (
                   continue;
                 }
 
-                // Check for terminal quota exhaustion → switch accounts
-                if (response.status === 429) {
-                  const { classifyQuotaResponse } = await import("./plugin/retry/quota");
-                  const quotaContext = await classifyQuotaResponse(response);
-                  const isQuotaExhausted = quotaContext?.terminal && quotaContext.reason === "QUOTA_EXHAUSTED";
-
-                  // Fallback: check raw response body for quota exhaustion keywords
-                  // (covers cases where ErrorInfo domain/reason doesn't match our whitelist)
-                  let isBodyQuotaExhausted = false;
-                  if (!isQuotaExhausted) {
-                    try {
-                      const bodyText = await response.clone().text();
-                      const lower = bodyText.toLowerCase();
-                      isBodyQuotaExhausted = lower.includes("quota exceeded") && lower.includes("per day");
-                    } catch { }
-                  }
-
-                  if (isQuotaExhausted || isBodyQuotaExhausted) {
-                    const resetTime = quotaContext?.retryDelayMs
-                      ? Date.now() + quotaContext.retryDelayMs
-                      : undefined;
+                // Check for switchable 429 → try next account
+                const switchResult = await classifyAccountSwitch(response);
+                if (switchResult) {
+                  if (switchResult.reason === "switch-quota") {
+                    const resetTime = switchResult.retryDelayMs
+                      ? Date.now() + switchResult.retryDelayMs : undefined;
                     if (isGeminiDebugEnabled()) {
                       logGeminiDebugMessage(
                         `Account ${account.email ?? account.id} quota exhausted, switching to next account`,
                       );
                     }
                     accountManager.markExhausted(account.id, resetTime);
-                    lastExhaustedResponse = response;
-                    continue; // try next account
+                  } else if (isGeminiDebugEnabled()) {
+                    logGeminiDebugMessage(
+                      `Account ${account.email ?? account.id} ${switchResult.reason === "switch-rate" ? "rate-limited" : "model capacity exhausted"}, switching to next account`,
+                    );
                   }
-
-                  // RATE_LIMIT: switch accounts immediately (short-lived, no need to mark exhausted)
-                  if (quotaContext?.reason === "RATE_LIMIT_EXCEEDED") {
-                    if (isGeminiDebugEnabled()) {
-                      logGeminiDebugMessage(
-                        `Account ${account.email ?? account.id} rate-limited, switching to next account`,
-                      );
-                    }
-                    lastExhaustedResponse = response;
-                    continue;
-                  }
+                  lastExhaustedResponse = response;
+                  continue;
                 }
 
                 // Sync working auth to framework if a previous account had auth failure
@@ -557,3 +551,58 @@ async function maybeLogAvailableQuotaModels(
     `Code Assist models visible via quota buckets (${projectId}): ${modelIds.join(", ")}`,
   );
 }
+
+/**
+ * Classifies a 429 response and determines whether the multi-account loop
+ * should switch to the next account.
+ *
+ * Returns:
+ * - "switch-quota": QUOTA_EXHAUSTED → mark exhausted + continue
+ * - "switch-rate": RATE_LIMIT_EXCEEDED → continue (no mark)
+ * - "switch-capacity": MODEL_CAPACITY_EXHAUSTED → continue (no mark)
+ * - null: not a switchable 429, let caller handle normally
+ */
+type SwitchReason = "switch-quota" | "switch-rate" | "switch-capacity";
+
+export async function classifyAccountSwitch(response: Response): Promise<{
+  reason: SwitchReason;
+  retryDelayMs?: number;
+} | null> {
+  if (response.status !== 429) return null;
+
+  // Prefer cached result from fetchWithRetry to avoid re-reading the response body
+  // (Bun v1.3.10 has issues with chained Response.clone() calls).
+  const { quotaContextCache } = await import("./plugin/retry");
+  let quotaContext = quotaContextCache.get(response) ?? null;
+
+  if (!quotaContext) {
+    const { classifyQuotaResponse } = await import("./plugin/retry/quota");
+    quotaContext = await classifyQuotaResponse(response.clone());
+  }
+
+  const isQuotaExhausted = quotaContext?.terminal && quotaContext.reason === "QUOTA_EXHAUSTED";
+
+  // Fallback: body-based quota detection
+  let isBodyQuotaExhausted = false;
+  if (!isQuotaExhausted) {
+    try {
+      const bodyText = await response.clone().text();
+      const lower = bodyText.toLowerCase();
+      isBodyQuotaExhausted = lower.includes("quota exceeded") && lower.includes("per day");
+    } catch { }
+  }
+
+  if (isQuotaExhausted || isBodyQuotaExhausted) {
+    return { reason: "switch-quota", retryDelayMs: quotaContext?.retryDelayMs };
+  }
+  if (quotaContext?.reason === "RATE_LIMIT_EXCEEDED") {
+    return { reason: "switch-rate" };
+  }
+  if (quotaContext?.reason === "MODEL_CAPACITY_EXHAUSTED") {
+    return { reason: "switch-capacity" };
+  }
+  return null;
+}
+
+export type { SwitchReason };
+

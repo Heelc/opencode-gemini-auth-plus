@@ -7,15 +7,24 @@ import {
   resolveRetryDelayMs,
   wait,
 } from "./helpers";
-import { classifyQuotaResponse, retryInternals } from "./quota";
+import { classifyQuotaResponse, type QuotaContext, retryInternals } from "./quota";
 import { isGeminiDebugEnabled, logGeminiDebugMessage } from "../debug";
 
 const retryCooldownByKey = new Map<string, number>();
 const RETRY_IN_FLIGHT_LOG_INTERVAL_MS = 5000;
 const MODEL_CAPACITY_COOLDOWN_MS = 8000;
 
+/**
+ * Cache for quota context per Response, avoids re-parsing response body.
+ * Bun v1.3.10 has issues with multiple Response.clone() chains.
+ */
+export const quotaContextCache = new WeakMap<Response, QuotaContext | null>();
+
 export interface FetchWithRetryOptions {
-  /** Treat RATE_LIMIT_EXCEEDED as terminal (no retries). Used in multi-account mode. */
+  /**
+   * Treat RATE_LIMIT_EXCEEDED, QUOTA_EXHAUSTED and MODEL_CAPACITY_EXHAUSTED as terminal (no retries).
+   * Used in multi-account mode so the caller can switch to the next account.
+   */
   terminalOnRateLimit?: boolean;
 }
 
@@ -76,7 +85,14 @@ export async function fetchWithRetry(
       return response;
     }
 
-    const quotaContext = response.status === 429 ? await classifyQuotaResponse(response) : null;
+    // Classify quota/rate/capacity context for 429 responses.
+    // Cache the result so callers (classifyAccountSwitch, account-fetch) can reuse it
+    // without re-reading the response body (Bun has issues with chained Response.clone()).
+    let quotaContext: QuotaContext | null = null;
+    if (response.status === 429) {
+      quotaContext = await classifyQuotaResponse(response.clone());
+      quotaContextCache.set(response, quotaContext);
+    }
 
     // In multi-account mode, treat RATE_LIMIT as terminal → let caller switch accounts
     if (response.status === 429
@@ -84,6 +100,30 @@ export async function fetchWithRetry(
         && quotaContext?.reason === "RATE_LIMIT_EXCEEDED") {
       debugRetry(
         `attempt ${attempt} rate-limited (multi-account terminal), returning for account switch`,
+      );
+      return response;
+    }
+
+    // In multi-account mode, treat QUOTA_EXHAUSTED as terminal → let caller switch accounts
+    if (response.status === 429
+        && options?.terminalOnRateLimit
+        && quotaContext?.terminal
+        && quotaContext.reason === "QUOTA_EXHAUSTED") {
+      debugRetry(
+        `attempt ${attempt} quota exhausted (multi-account terminal), returning for account switch`,
+      );
+      return response;
+    }
+
+    // In multi-account mode, treat MODEL_CAPACITY_EXHAUSTED as terminal → let caller switch accounts.
+    // Set cooldown first to prevent retry storms when all accounts hit capacity limits.
+    if (response.status === 429
+        && options?.terminalOnRateLimit
+        && quotaContext?.reason === "MODEL_CAPACITY_EXHAUSTED") {
+      const cooldownMs = quotaContext.retryDelayMs ?? MODEL_CAPACITY_COOLDOWN_MS;
+      setRetryCooldown(throttleKey, cooldownMs);
+      debugRetry(
+        `attempt ${attempt} model capacity exhausted (multi-account terminal), cooldown ${cooldownMs}ms, returning for account switch`,
       );
       return response;
     }
